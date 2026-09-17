@@ -187,6 +187,21 @@ func makeItemViews(items []Item) []itemView {
 }
 
 func parseQuantity(value string, minimum int64) (int64, bool) {
+	if value == ""|| len(value)>2{
+		return 0, false
+	} 
+	if value == "0"{
+		if minimum>0{
+			return 0, false
+		}
+		return 0, true
+	}
+	 if value[0] < '1' || value[0] > '9' {
+        return 0, false
+    }
+	if len(value) == 2 && (value[1] < '0' || value[1] > '9') {
+        return 0, false
+    }
 	parsed, err := strconv.ParseFloat(value, 64)
 	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed != math.Trunc(parsed) {
 		return 0, false

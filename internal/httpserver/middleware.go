@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -242,10 +243,49 @@ func boolToInt64(value bool) int64 {
 	return 0
 }
 
-
-func contentTypeOptions(next http.Handler) http.Handler{
+func contentTypeOptions(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options","nosniff")
-		next.ServeHTTP(w,r)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func validateRequestOrigin(appOrigin string, renderer *templates.Renderer) middleware {
+	return func(next http.Handler) http.Handler {
+
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				next.ServeHTTP(w, r)
+				return
+			}
+			source := r.Header.Get("Origin")
+			if source == appOrigin {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if source == "" {
+				referer := r.Header.Get("Referer")
+				parsedReferer , err := url.Parse(referer)
+				if err == nil && referer != "" && parsedReferer.Scheme+"://"+parsedReferer.Host == appOrigin{
+					next.ServeHTTP(w, r)
+					return
+				}
+
+			}
+			if err := httpx.RespondWithErrorPage(w, renderer, http.StatusForbidden, "Forbidden", "This request did not come from Bearly Secure."); err != nil {
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				
+			}
+			
+		})
+
+	}
+}
+
+func contentSecuirtyPolicy(next http.Handler) http.Handler{
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
+		nonce := httpx.CSPNonce(r.Context())
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'nonce-"+nonce+"'; style-src 'self'; img-src 'self' data:; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'")
+		next.ServeHTTP(w, r)
 	})
 }
