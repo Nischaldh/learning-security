@@ -26,6 +26,21 @@ type orderItemResponse struct {
 	PriceCents  int64  `json:"price_cents"`
 }
 
+type productResponse struct{
+	ID int64 `json:"id"`
+	Name string `json:"name"`
+	Description string `json:"description"`
+	ImagePath string `json:"image_path"`
+	PriceCents int64 `json:"price_cents"`
+}
+
+type orderResponse struct{
+	ID int64 `json:"id"`
+	Status     string `json:"status"`
+	TotalCents int64  `json:"total_cents"`
+	CreatedAt  string `json:"created_at"`
+}
+
 type Handler struct {
 	accountStore      *accounts.Store
 	orderStore        *orders.Store
@@ -52,7 +67,8 @@ func (handler *Handler) AccountOrders(responseWriter http.ResponseWriter, reques
 		handler.internalError(responseWriter, request, err)
 		return
 	}
-	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{"orders": orders})
+	orderResponses := toOrderResponses(orders)
+	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{"orders": orderResponses})
 }
 
 func (handler *Handler) Order(responseWriter http.ResponseWriter, request *http.Request) {
@@ -83,16 +99,18 @@ func (handler *Handler) Order(responseWriter http.ResponseWriter, request *http.
 	for _, item := range items {
 		itemResponses = append(itemResponses, orderItemResponse{ProductID: item.ProductID, ProductName: item.ProductName, Quantity: item.Quantity, PriceCents: item.PriceCents})
 	}
-	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{"order": order, "items": itemResponses})
+	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{"order": toOrderResponse(order), "items": itemResponses})
 }
 
 func (handler *Handler) Products(responseWriter http.ResponseWriter, request *http.Request) {
-	products, err := handler.productStore.ListAllProducts(request.Context())
+	products, err := handler.productStore.ListProducts(request.Context(), handler.maxProductResults)
+	
 	if err != nil {
 		handler.internalError(responseWriter, request, err)
 		return
 	}
-	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{"products": products})
+	productsRes := toProductResponse(products)
+	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{"products": productsRes})
 }
 
 func (handler *Handler) WarehouseOrders(responseWriter http.ResponseWriter, request *http.Request) {
@@ -113,12 +131,7 @@ func (handler *Handler) WarehouseOrders(responseWriter http.ResponseWriter, requ
 		handler.internalError(responseWriter, request, err)
 		return
 	}
-	responses := make([]integrationOrderResponse, 0, len(orders))
-	for _, order := range orders {
-		responses = append(responses, integrationOrderResponse{
-			ID: order.ID, Status: order.Status, TotalCents: order.TotalCents, CreatedAt: order.CreatedAt,
-		})
-	}
+	responses := toOrderResponses(orders)
 	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{
 		"integration": "Warehouse Fulfillment Integration",
 		"orders":      responses,
@@ -141,4 +154,39 @@ func (handler *Handler) requireAuthentication(responseWriter http.ResponseWriter
 func (handler *Handler) internalError(responseWriter http.ResponseWriter, request *http.Request, err error) {
 	_ = handler.logger.Event("unhandled_error", map[string]any{"method": request.Method, "path": request.URL.Path, "message": err.Error()})
 	httpx.RespondWithError(responseWriter, http.StatusInternalServerError, err.Error())
+}
+
+
+
+func toProductResponse(products []storefront.Product)[]productResponse{
+	var res []productResponse
+	for _, product := range products{
+		pro := productResponse{
+			ID: product.ID,
+			Name: product.Name,
+			Description: product.Description,
+			ImagePath: product.ImagePath,
+			PriceCents: product.PriceCents,
+		}
+		res = append(res, pro)
+	}
+	return res
+	
+}
+
+func toOrderResponses(orders []orders.Order) []orderResponse{
+	var orderRes []orderResponse
+	for _, order:= range orders{
+		o := orderResponse{
+			ID: order.ID,
+			Status: order.Status,
+			TotalCents: order.TotalCents,
+			CreatedAt: order.CreatedAt,
+		}
+		orderRes = append(orderRes, o)
+	}
+	return orderRes
+}
+func toOrderResponse(order orders.Order) orderResponse {
+	return orderResponse{ID: order.ID, Status: order.Status, TotalCents: order.TotalCents, CreatedAt: order.CreatedAt}
 }

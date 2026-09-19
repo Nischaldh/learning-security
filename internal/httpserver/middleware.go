@@ -30,22 +30,6 @@ func applyMiddleware(handler http.Handler, middlewareChain ...middleware) http.H
 	return handler
 }
 
-func permissiveCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
-		if origin := request.Header.Get("Origin"); origin != "" {
-			responseWriter.Header().Set("Access-Control-Allow-Origin", origin)
-			responseWriter.Header().Set("Access-Control-Allow-Credentials", "true")
-			responseWriter.Header().Set("Vary", "Origin")
-		}
-		if request.Method == http.MethodOptions {
-			responseWriter.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			responseWriter.Header().Set("Access-Control-Allow-Headers", request.Header.Get("Access-Control-Request-Headers"))
-			responseWriter.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(responseWriter, request)
-	})
-}
 
 func cspNonce(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
@@ -243,12 +227,12 @@ func boolToInt64(value bool) int64 {
 	return 0
 }
 
-func contentTypeOptions(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		next.ServeHTTP(w, r)
-	})
-}
+// func contentTypeOptions(next http.Handler) http.Handler {
+// 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 		w.Header().Set("X-Content-Type-Options", "nosniff")
+// 		next.ServeHTTP(w, r)
+// 	})
+// }
 
 func validateRequestOrigin(appOrigin string, renderer *templates.Renderer) middleware {
 	return func(next http.Handler) http.Handler {
@@ -282,10 +266,64 @@ func validateRequestOrigin(appOrigin string, renderer *templates.Renderer) middl
 	}
 }
 
-func contentSecuirtyPolicy(next http.Handler) http.Handler{
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
+// func contentSecuirtyPolicy(next http.Handler) http.Handler{
+// 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
+// 		nonce := httpx.CSPNonce(r.Context())
+
+// 		w.Header().Set("X-Frame-Options","SAMEORIGIN")
+// 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+// 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'nonce-"+nonce+"'; style-src 'self'; img-src 'self' data:; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'")
+// 		next.ServeHTTP(w, r)
+// 	})
+// }
+
+func publicProductCORS(next http.Handler) http.Handler{
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if r.Method == http.MethodOptions{
+			w.Header().Set("Access-Control-Allow-Methods", http.MethodGet)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		nonce := httpx.CSPNonce(r.Context())
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'nonce-"+nonce+"'; style-src 'self'; img-src 'self' data:; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'")
+
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; "+
+				"script-src 'self' 'nonce-"+nonce+"'; "+
+				"style-src 'self'; "+
+				"img-src 'self' data:; "+
+				"frame-src 'self'; "+
+				"object-src 'none'; "+
+				"base-uri 'self'; "+
+				"form-action 'self'; "+
+				"frame-ancestors 'self'",
+		)
+
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+		w.Header().Set("Origin-Agent-Cluster", "?1")
+		w.Header().Set("X-DNS-Prefetch-Control", "off")
+		w.Header().Set("X-Download-Options", "noopen")
+		w.Header().Set("X-Permitted-Cross-Domain-Policies", "none")
+		w.Header().Set("X-XSS-Protection", "0")
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func crossOriginResource(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
 		next.ServeHTTP(w, r)
 	})
 }

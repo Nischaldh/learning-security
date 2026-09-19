@@ -3,6 +3,7 @@ package httpx
 import (
 	"encoding/json"
 	"fmt"
+
 	"log"
 	"net/http"
 
@@ -10,10 +11,16 @@ import (
 	"github.com/bootdotdev/learn-web-security/internal/textutils"
 )
 
+const (
+	internalErrorTitle   = "Something Went Wrong"
+	internalErrorMessage = "The request failed. Try again, or return to the store."
+)
+
 func RespondWithError(responseWriter http.ResponseWriter, code int, message string) {
 	message = textutils.StripANSI(message)
 	if code >= 500 {
 		fmt.Printf("Responding with error code %v, message: %v\n", code, message)
+		message = internalErrorMessage
 	}
 	RespondWithJSON(responseWriter, code, map[string]string{"error": message})
 }
@@ -28,6 +35,10 @@ func RespondWithJSON(responseWriter http.ResponseWriter, code int, payload any) 
 }
 
 func RespondWithErrorPage(responseWriter http.ResponseWriter, renderer *templates.Renderer, statusCode int, title, message string) error {
+	if statusCode >= 500 {
+		title = internalErrorTitle
+		message = internalErrorMessage
+	}
 	return renderer.Render(responseWriter, statusCode, "error", templates.ErrorPage{
 		Title:      title,
 		StatusCode: statusCode,

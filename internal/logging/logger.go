@@ -10,6 +10,17 @@ import (
 	"time"
 )
 
+const redactedValue = "[REDACTED]"
+
+var sensitiveFields = map[string]struct{}{
+	"sessionId":   {},
+	"resetToken":  {},
+	"resetLink":   {},
+	"secret":      {},
+	"adminNotes":  {},
+	"storagePath": {},
+}
+
 type Logger struct {
 	mutex sync.Mutex
 	file  *os.File
@@ -38,6 +49,11 @@ func (logger *Logger) Event(eventName string, fields map[string]any) error {
 	}
 	maps.Copy(record, fields)
 
+	for field := range sensitiveFields {
+		if _, exists := record[field]; exists {
+			record[field] = redactedValue
+		}
+	}
 	logger.mutex.Lock()
 	defer logger.mutex.Unlock()
 	if err := json.NewEncoder(logger.file).Encode(record); err != nil {
