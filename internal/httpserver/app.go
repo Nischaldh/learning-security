@@ -51,6 +51,7 @@ type Options struct {
 	FixtureDirectory        string
 	TemplateDirectory       string
 	PublicDirectory         string
+	TrustedProxyHops        int
 }
 
 type Application struct {

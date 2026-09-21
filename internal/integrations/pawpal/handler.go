@@ -35,7 +35,11 @@ func (handler *Handler) Webhook(responseWriter http.ResponseWriter, request *htt
 		return
 	}
 
-	verification := VerifyWebhook(payload)
+	verification := VerifyWebhook(
+		payload,
+		[]byte(request.Header.Get("X-PawPal-Key")),
+		[]byte(handler.apiKey),
+	)
 	switch verification.Outcome {
 	case WebhookUnauthorized:
 		http.Error(responseWriter, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
