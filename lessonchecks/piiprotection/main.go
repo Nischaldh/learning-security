@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/bootdotdev/learn-web-security/internal/database"
-	"github.com/bootdotdev/learn-web-security/internal/logging"
+	"github.com/Nischaldh/learn-web-security/internal/database"
+	"github.com/Nischaldh/learn-web-security/internal/logging"
 )
 
 type result struct {

@@ -8,12 +8,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/bootdotdev/learn-web-security/internal/accounts"
-	"github.com/bootdotdev/learn-web-security/internal/auth/mfa"
-	"github.com/bootdotdev/learn-web-security/internal/auth/passwords"
-	"github.com/bootdotdev/learn-web-security/internal/auth/sessions"
-	"github.com/bootdotdev/learn-web-security/internal/httpx"
-	"github.com/bootdotdev/learn-web-security/internal/templates"
+	"github.com/Nischaldh/learn-web-security/internal/accounts"
+	"github.com/Nischaldh/learn-web-security/internal/auth/mfa"
+	"github.com/Nischaldh/learn-web-security/internal/auth/passwords"
+	"github.com/Nischaldh/learn-web-security/internal/auth/sessions"
+	"github.com/Nischaldh/learn-web-security/internal/httpx"
+	"github.com/Nischaldh/learn-web-security/internal/templates"
 )
 
 const totpLoginChallengeCookieName = "totp_login_challenge"
@@ -139,6 +139,11 @@ func (handler *authHandler) TOTPLogin(responseWriter http.ResponseWriter, reques
 			"failureReason": "totp code mismatch",
 			"returnTo":      challenge.ReturnTo,
 		})
+		handler.failedLoginAlerts.Record(
+			requestID(request.Context()).String(),
+			clientIPKeyWithTrustedProxies(handler.trustedProxyHops)(request),
+			user.ID,
+		)
 		if exhausted {
 			clearTOTPLoginChallengeCookie(responseWriter)
 			http.Redirect(responseWriter, request, verificationRestartLoginPath(challenge.ReturnTo), http.StatusFound)
@@ -302,6 +307,11 @@ func (handler *authHandler) RequestPasswordReset(responseWriter http.ResponseWri
 			"success":       false,
 			"failureReason": "email not found",
 		})
+		handler.resetAlerts.Record(
+			requestID(request.Context()).String(),
+			clientIPKeyWithTrustedProxies(handler.trustedProxyHops)(request),
+			nil,
+		)
 		if err := handler.renderPasswordResetRequest(responseWriter, http.StatusOK, true, "", "/password-reset/"); err != nil {
 			handler.internalError(responseWriter, request, err)
 		}
@@ -324,6 +334,12 @@ func (handler *authHandler) RequestPasswordReset(responseWriter http.ResponseWri
 		"resetToken": resetToken.Value,
 		"resetLink":  resetLink,
 	})
+	handler.resetAlerts.Record(
+		requestID(request.Context()).String(),
+		clientIPKeyWithTrustedProxies(handler.trustedProxyHops)(request),
+		user.ID,
+	)
+
 	if err := handler.renderPasswordResetRequest(responseWriter, http.StatusOK, true, "", ""); err != nil {
 		handler.internalError(responseWriter, request, err)
 	}

@@ -3,6 +3,7 @@
 package httpserver
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -15,13 +16,20 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"uuid"
 
-	"github.com/bootdotdev/learn-web-security/internal/httpx"
-	"github.com/bootdotdev/learn-web-security/internal/logging"
-	"github.com/bootdotdev/learn-web-security/internal/templates"
+	"github.com/Nischaldh/learn-web-security/internal/httpx"
+	"github.com/Nischaldh/learn-web-security/internal/logging"
+	"github.com/Nischaldh/learn-web-security/internal/templates"
 )
 
 type middleware func(http.Handler) http.Handler
+
+type contextKey string
+
+const (
+	requestIDContextKey contextKey = "request-id"
+)
 
 func applyMiddleware(handler http.Handler, middlewareChain ...middleware) http.Handler {
 	for _, currentMiddleware := range slices.Backward(middlewareChain) {
@@ -29,7 +37,6 @@ func applyMiddleware(handler http.Handler, middlewareChain ...middleware) http.H
 	}
 	return handler
 }
-
 
 func cspNonce(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
@@ -64,15 +71,75 @@ func recoverPanics(logger *logging.Logger, renderer *templates.Renderer) middlew
 	}
 }
 
-func LoadShedder(_ int, _ int) func(http.Handler) http.Handler {
+func LoadShedder(maxInFlight int, retryAfter int) func(http.Handler) http.Handler {
+	if maxInFlight <= 0 {
+		panic("max in-flight requests must be positive")
+	}
+	if retryAfter <= 0 {
+		panic("retry-after must be positive")
+	}
+
+	inFlight := make(chan struct{}, maxInFlight)
+
 	return func(next http.Handler) http.Handler {
-		return next
+		return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+			responseWriter.Header().Set(
+				"X-In-Flight-Limit",
+				strconv.Itoa(maxInFlight),
+			)
+
+			select {
+			case inFlight <- struct{}{}:
+				defer func() {
+					<-inFlight
+				}()
+
+				next.ServeHTTP(responseWriter, request)
+
+			default:
+				responseWriter.Header().Set(
+					"Retry-After",
+					strconv.Itoa(retryAfter),
+				)
+
+				httpx.RespondWithJSON(
+					responseWriter,
+					http.StatusServiceUnavailable,
+					map[string]string{
+						"error": "Service is at capacity",
+					},
+				)
+			}
+		})
 	}
 }
 
-func SearchThrottle(_ *templates.Renderer) func(http.Handler) http.Handler {
+func SearchThrottle(renderer *templates.Renderer) func(http.Handler) http.Handler {
+	limiter := fixedWindowRateLimiter(rateLimitOptions{
+		window:  time.Second,
+		maximum: 5,
+		key: func(_ *http.Request) string {
+			return "search"
+		},
+		onLimit: func(w http.ResponseWriter, _ *http.Request, _ rateLimitState) {
+			if err := httpx.RespondWithErrorPage(
+				w,
+				renderer,
+				http.StatusTooManyRequests,
+				"Search Is Busy",
+				"Try again shortly.",
+			); err != nil {
+				http.Error(
+					w,
+					http.StatusText(http.StatusInternalServerError),
+					http.StatusInternalServerError,
+				)
+			}
+		},
+	})
+
 	return func(next http.Handler) http.Handler {
-		return next
+		return limiter(next)
 	}
 }
 
@@ -182,9 +249,18 @@ func (limiter *fixedWindowLimiter) reject(responseWriter http.ResponseWriter, re
 }
 
 func fixedWindowRateLimiter(options rateLimitOptions) middleware {
-	validateRateLimitOptions(options)
+	limiter := newFixedWindowLimiter(options)
+	// validateRateLimitOptions(options)
 	return func(next http.Handler) http.Handler {
-		return next
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			state, limited := limiter.consume(r)
+			if limited {
+				limiter.reject(w, r, state)
+				return
+			}
+			setRateLimitHeaders(w, state)
+			next.ServeHTTP(w, r)
+		})
 	}
 }
 
@@ -249,8 +325,8 @@ func validateRequestOrigin(appOrigin string, renderer *templates.Renderer) middl
 			}
 			if source == "" {
 				referer := r.Header.Get("Referer")
-				parsedReferer , err := url.Parse(referer)
-				if err == nil && referer != "" && parsedReferer.Scheme+"://"+parsedReferer.Host == appOrigin{
+				parsedReferer, err := url.Parse(referer)
+				if err == nil && referer != "" && parsedReferer.Scheme+"://"+parsedReferer.Host == appOrigin {
 					next.ServeHTTP(w, r)
 					return
 				}
@@ -258,9 +334,9 @@ func validateRequestOrigin(appOrigin string, renderer *templates.Renderer) middl
 			}
 			if err := httpx.RespondWithErrorPage(w, renderer, http.StatusForbidden, "Forbidden", "This request did not come from Bearly Secure."); err != nil {
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-				
+
 			}
-			
+
 		})
 
 	}
@@ -269,7 +345,6 @@ func validateRequestOrigin(appOrigin string, renderer *templates.Renderer) middl
 // func contentSecuirtyPolicy(next http.Handler) http.Handler{
 // 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
 // 		nonce := httpx.CSPNonce(r.Context())
-
 // 		w.Header().Set("X-Frame-Options","SAMEORIGIN")
 // 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 // 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'nonce-"+nonce+"'; style-src 'self'; img-src 'self' data:; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'")
@@ -277,10 +352,10 @@ func validateRequestOrigin(appOrigin string, renderer *templates.Renderer) middl
 // 	})
 // }
 
-func publicProductCORS(next http.Handler) http.Handler{
+func publicProductCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		if r.Method == http.MethodOptions{
+		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Methods", http.MethodGet)
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -326,4 +401,18 @@ func crossOriginResource(next http.Handler) http.Handler {
 		w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
 		next.ServeHTTP(w, r)
 	})
+}
+
+func assignRequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		requestID := uuid.NewV4()
+		responseWriter.Header().Set("X-Request-ID", requestID.String())
+		request = request.WithContext(context.WithValue(request.Context(), requestIDContextKey, requestID))
+		next.ServeHTTP(responseWriter, request)
+	})
+}
+
+func requestID(ctx context.Context) uuid.UUID {
+	identifier, _ := ctx.Value(requestIDContextKey).(uuid.UUID)
+	return identifier
 }

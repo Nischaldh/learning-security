@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bootdotdev/learn-web-security/internal/database"
+	"github.com/Nischaldh/learn-web-security/internal/database"
 )
 
 type result struct {

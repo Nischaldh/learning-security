@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/bootdotdev/learn-web-security/internal/storage"
+	"github.com/Nischaldh/learn-web-security/internal/storage"
 )
 
 type ShippingDetails struct {
@@ -29,8 +29,8 @@ func EncryptShippingDetails(details ShippingDetails, keyring *storage.Keyring) (
 	if err != nil {
 		return "", fmt.Errorf("serialize shipping details: %w", err)
 	}
-	encrypted, err:= keyring.Encrypt(plaintext)
-	if err!=nil{
+	encrypted, err := keyring.Encrypt(plaintext)
+	if err != nil {
 		return "", fmt.Errorf("Error encrypting the shippping address: %w", err)
 
 	}
@@ -38,8 +38,8 @@ func EncryptShippingDetails(details ShippingDetails, keyring *storage.Keyring) (
 }
 
 func DecryptShippingDetails(encryptedDetails string, keyring *storage.Keyring) (ShippingDetails, error) {
-	plaintext, err:= keyring.Decrypt(encryptedDetails)
-	if err!=nil{
+	plaintext, err := keyring.Decrypt(encryptedDetails)
+	if err != nil {
 		return ShippingDetails{}, fmt.Errorf("decrypt shipping details: %w", err)
 	}
 	var details serializedShippingDetails

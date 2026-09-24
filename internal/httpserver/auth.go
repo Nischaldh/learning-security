@@ -2,19 +2,24 @@ package httpserver
 
 import (
 	"errors"
+	"time"
+
+	"maps"
 	"net/http"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/bootdotdev/learn-web-security/internal/accounts"
-	"github.com/bootdotdev/learn-web-security/internal/auth/mfa"
-	"github.com/bootdotdev/learn-web-security/internal/auth/passwordreset"
-	"github.com/bootdotdev/learn-web-security/internal/auth/passwords"
-	"github.com/bootdotdev/learn-web-security/internal/auth/returnto"
-	"github.com/bootdotdev/learn-web-security/internal/auth/sessions"
-	"github.com/bootdotdev/learn-web-security/internal/httpx"
-	"github.com/bootdotdev/learn-web-security/internal/logging"
-	"github.com/bootdotdev/learn-web-security/internal/templates"
+	"github.com/Nischaldh/learn-web-security/internal/accounts"
+	"github.com/Nischaldh/learn-web-security/internal/auth/mfa"
+	"github.com/Nischaldh/learn-web-security/internal/auth/passwordreset"
+	"github.com/Nischaldh/learn-web-security/internal/auth/passwords"
+	"github.com/Nischaldh/learn-web-security/internal/auth/returnto"
+	"github.com/Nischaldh/learn-web-security/internal/auth/sessions"
+	"github.com/Nischaldh/learn-web-security/internal/botdetection"
+	"github.com/Nischaldh/learn-web-security/internal/httpx"
+	"github.com/Nischaldh/learn-web-security/internal/logging"
+	"github.com/Nischaldh/learn-web-security/internal/observability"
+	"github.com/Nischaldh/learn-web-security/internal/templates"
 )
 
 const (
@@ -28,22 +33,28 @@ type authPage struct {
 }
 
 type authHandler struct {
-	accounts       *accounts.Store
-	renderer       *templates.Renderer
-	logger         *logging.Logger
-	mfa            *mfa.Store
-	passwordResets *passwordreset.Store
-	appOrigin      string
+	accounts          *accounts.Store
+	renderer          *templates.Renderer
+	logger            *logging.Logger
+	trustedProxyHops  int
+	failedLoginAlerts *observability.AuthAlertThreshold
+	resetAlerts       *observability.AuthAlertThreshold
+	mfa               *mfa.Store
+	passwordResets    *passwordreset.Store
+	appOrigin         string
 }
 
-func newAuthHandler(accountStore *accounts.Store, mfaStore *mfa.Store, passwordResetStore *passwordreset.Store, renderer *templates.Renderer, logger *logging.Logger, appOrigin string) *authHandler {
+func newAuthHandler(accountStore *accounts.Store, mfaStore *mfa.Store, passwordResetStore *passwordreset.Store, renderer *templates.Renderer, logger *logging.Logger, appOrigin string, trustedProxyHops int) *authHandler {
 	return &authHandler{
-		accounts:       accountStore,
-		renderer:       renderer,
-		logger:         logger,
-		mfa:            mfaStore,
-		passwordResets: passwordResetStore,
-		appOrigin:      appOrigin,
+		accounts:          accountStore,
+		renderer:          renderer,
+		logger:            logger,
+		mfa:               mfaStore,
+		failedLoginAlerts: observability.NewAuthAlertThreshold("failed_logins", 3, 5*time.Minute, logger),
+		resetAlerts:       observability.NewAuthAlertThreshold("password_reset_requests", 3, 10*time.Minute, logger),
+		passwordResets:    passwordResetStore,
+		appOrigin:         appOrigin,
+		trustedProxyHops:  trustedProxyHops,
 	}
 }
 
@@ -83,24 +94,30 @@ func (handler *authHandler) Login(responseWriter http.ResponseWriter, request *h
 		return
 	}
 	if !found || !passwords.Verify(password, user.PasswordHash) {
+		userID := nullableInt64(user.ID, found)
 		handler.logAuthenticationEvent(request, "login_attempt", map[string]any{
 			"email":         email,
 			"success":       false,
 			"failureReason": loginFailureReason(found),
 			"returnTo":      returnTo,
 		})
+		handler.failedLoginAlerts.Record(
+			requestID(request.Context()).String(),
+			clientIPKeyWithTrustedProxies(handler.trustedProxyHops)(request),
+			userID,
+		)
 		if err := handler.renderLogin(responseWriter, http.StatusUnauthorized, "Invalid email or password", returnTo); err != nil {
 			handler.internalError(responseWriter, request, err)
 		}
 		return
 	}
-	if passwords.NeedsRehash(user.PasswordHash){
-		passwordHash, err:= passwords.Hash(password)
-		if err!=nil{
+	if passwords.NeedsRehash(user.PasswordHash) {
+		passwordHash, err := passwords.Hash(password)
+		if err != nil {
 			handler.internalError(responseWriter, request, err)
 			return
 		}
-		if err:=handler.accounts.UpdatePasswordHash(request.Context(),user.ID, passwordHash);err!=nil{
+		if err := handler.accounts.UpdatePasswordHash(request.Context(), user.ID, passwordHash); err != nil {
 			handler.internalError(responseWriter, request, err)
 			return
 		}
@@ -167,6 +184,9 @@ func (handler *authHandler) Signup(responseWriter http.ResponseWriter, request *
 		http.Redirect(responseWriter, request, "/account", http.StatusFound)
 		return
 	}
+	if botdetection.ProtectSignup(responseWriter, request, handler.renderer) {
+		return
+	}
 
 	email, emailErr := httpx.FormValue(request, "email")
 	displayName, displayNameErr := httpx.FormValue(request, "displayName")
@@ -222,9 +242,10 @@ func (handler *authHandler) Signup(responseWriter http.ResponseWriter, request *
 	http.Redirect(responseWriter, request, "/account", http.StatusFound)
 }
 
-func parseForm(_ int64, renderer *templates.Renderer) middleware {
+func parseForm(maxBodyBytes int64, renderer *templates.Renderer) middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+			request.Body = http.MaxBytesReader(responseWriter, request.Body, maxBodyBytes)
 			if err := request.ParseForm(); err != nil {
 				statusCode := http.StatusBadRequest
 				heading := "Invalid Request"
@@ -301,12 +322,22 @@ func (handler *authHandler) internalError(responseWriter http.ResponseWriter, re
 	}
 }
 
-func (handler *authHandler) logAuthenticationEvent(_ *http.Request, eventName string, fields map[string]any) {
-	_ = handler.logger.Event(eventName, fields)
+func (handler *authHandler) logAuthenticationEvent(request *http.Request, eventName string, fields map[string]any) {
+	eventFields := make(map[string]any, len(fields)+4)
+	maps.Copy(eventFields, fields)
+	eventFields["requestId"] = requestID(request.Context()).String()
+	eventFields["sourceIp"] = clientIPKeyWithTrustedProxies(handler.trustedProxyHops)(request)
+	eventFields["userId"] = fields["userId"]
+	eventFields["outcome"] = "failure"
+	if success, _ := fields["success"].(bool); success {
+		eventFields["outcome"] = "success"
+	}
+
+	_ = handler.logger.Event(eventName, eventFields)
 }
 
 func safeReturnTo(value string) string {
-	url:= returnto.Safe(value)
+	url := returnto.Safe(value)
 	if url == "" {
 		return "/"
 	}

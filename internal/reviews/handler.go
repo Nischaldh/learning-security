@@ -6,11 +6,11 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/bootdotdev/learn-web-security/internal/accounts"
-	"github.com/bootdotdev/learn-web-security/internal/auth/sessions"
-	"github.com/bootdotdev/learn-web-security/internal/httpx"
-	"github.com/bootdotdev/learn-web-security/internal/logging"
-	"github.com/bootdotdev/learn-web-security/internal/templates"
+	"github.com/Nischaldh/learn-web-security/internal/accounts"
+	"github.com/Nischaldh/learn-web-security/internal/auth/sessions"
+	"github.com/Nischaldh/learn-web-security/internal/httpx"
+	"github.com/Nischaldh/learn-web-security/internal/logging"
+	"github.com/Nischaldh/learn-web-security/internal/templates"
 )
 
 type listPageView struct {
@@ -100,7 +100,7 @@ func (handler *Handler) Edit(responseWriter http.ResponseWriter, request *http.R
 		return
 	}
 	review, found := handler.requireOwned(responseWriter, request, current.User.ID)
-	if !found{
+	if !found {
 		return
 	}
 	if err := handler.renderForm(responseWriter, http.StatusOK, current, review, ""); err != nil {
@@ -114,7 +114,7 @@ func (handler *Handler) Update(responseWriter http.ResponseWriter, request *http
 		return
 	}
 	review, found := handler.requireOwned(responseWriter, request, current.User.ID)
-	if !found || current.Session.UserID != review.UserID{
+	if !found || current.Session.UserID != review.UserID {
 		handler.reviewNotFound(responseWriter)
 		return
 	}
@@ -151,7 +151,7 @@ func (handler *Handler) Delete(responseWriter http.ResponseWriter, request *http
 		return
 	}
 	review, found := handler.requireOwned(responseWriter, request, current.User.ID)
-	if !found ||current.Session.UserID != review.UserID{
+	if !found || current.Session.UserID != review.UserID {
 		handler.reviewNotFound(responseWriter)
 		return
 	}
@@ -238,7 +238,7 @@ func parseRating(value string) (int64, bool) {
 
 func parseBody(value string) (string, bool) {
 	trimmed := strings.TrimSpace(value)
-	if trimmed == "" || utf8.RuneCountInString(trimmed)>1000{
+	if trimmed == "" || utf8.RuneCountInString(trimmed) > 1000 {
 		return "", false
 	}
 	return trimmed, true

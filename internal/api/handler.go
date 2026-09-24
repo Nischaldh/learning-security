@@ -4,12 +4,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/bootdotdev/learn-web-security/internal/accounts"
-	"github.com/bootdotdev/learn-web-security/internal/auth/sessions"
-	"github.com/bootdotdev/learn-web-security/internal/httpx"
-	"github.com/bootdotdev/learn-web-security/internal/logging"
-	"github.com/bootdotdev/learn-web-security/internal/orders"
-	"github.com/bootdotdev/learn-web-security/internal/storefront"
+	"github.com/Nischaldh/learn-web-security/internal/accounts"
+	"github.com/Nischaldh/learn-web-security/internal/auth/sessions"
+	"github.com/Nischaldh/learn-web-security/internal/httpx"
+	"github.com/Nischaldh/learn-web-security/internal/logging"
+	"github.com/Nischaldh/learn-web-security/internal/orders"
+	"github.com/Nischaldh/learn-web-security/internal/storefront"
 )
 
 type integrationOrderResponse struct {
@@ -26,16 +26,16 @@ type orderItemResponse struct {
 	PriceCents  int64  `json:"price_cents"`
 }
 
-type productResponse struct{
-	ID int64 `json:"id"`
-	Name string `json:"name"`
+type productResponse struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
 	Description string `json:"description"`
-	ImagePath string `json:"image_path"`
-	PriceCents int64 `json:"price_cents"`
+	ImagePath   string `json:"image_path"`
+	PriceCents  int64  `json:"price_cents"`
 }
 
-type orderResponse struct{
-	ID int64 `json:"id"`
+type orderResponse struct {
+	ID         int64  `json:"id"`
 	Status     string `json:"status"`
 	TotalCents int64  `json:"total_cents"`
 	CreatedAt  string `json:"created_at"`
@@ -104,7 +104,7 @@ func (handler *Handler) Order(responseWriter http.ResponseWriter, request *http.
 
 func (handler *Handler) Products(responseWriter http.ResponseWriter, request *http.Request) {
 	products, err := handler.productStore.ListProducts(request.Context(), handler.maxProductResults)
-	
+
 	if err != nil {
 		handler.internalError(responseWriter, request, err)
 		return
@@ -116,16 +116,27 @@ func (handler *Handler) Products(responseWriter http.ResponseWriter, request *ht
 func (handler *Handler) WarehouseOrders(responseWriter http.ResponseWriter, request *http.Request) {
 	apiKey := request.Header.Get("X-API-Key")
 	key, found, err := handler.apiStore.FindKey(request.Context(), apiKey)
-	if !found || err!=nil{
-		httpx.RespondWithError(responseWriter, http.StatusUnauthorized,"Invalid or missing api key.")
+	if !found || err != nil {
+		httpx.RespondWithError(responseWriter, http.StatusUnauthorized, "Invalid or missing api key.")
 		return
 	}
-	if !strings.Contains(key.Scope, "orders:read"){
-		httpx.RespondWithError(responseWriter, http.StatusForbidden,"Forbidden.")
+	if !strings.Contains(key.Scope, "orders:read") {
+		httpx.RespondWithError(responseWriter, http.StatusForbidden, "Forbidden.")
 		return
 	}
 
+	quota, err := handler.apiStore.ConsumeQuota(request.Context(), key.ID)
+	if err != nil {
+		httpx.RespondWithError(responseWriter, http.StatusTooManyRequests, "To many requesets.")
+		return
+	}
 
+	SetQuotaHeaders(responseWriter, quota)
+
+	if !quota.Allowed {
+		RespondWithQuotaExhausted(responseWriter, quota)
+		return
+	}
 	orders, err := handler.orderStore.ListAll(request.Context())
 	if err != nil {
 		handler.internalError(responseWriter, request, err)
@@ -135,6 +146,7 @@ func (handler *Handler) WarehouseOrders(responseWriter http.ResponseWriter, requ
 	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{
 		"integration": "Warehouse Fulfillment Integration",
 		"orders":      responses,
+		"quota":       ToQuotaResponse(quota),
 	})
 }
 
@@ -156,32 +168,30 @@ func (handler *Handler) internalError(responseWriter http.ResponseWriter, reques
 	httpx.RespondWithError(responseWriter, http.StatusInternalServerError, err.Error())
 }
 
-
-
-func toProductResponse(products []storefront.Product)[]productResponse{
+func toProductResponse(products []storefront.Product) []productResponse {
 	var res []productResponse
-	for _, product := range products{
+	for _, product := range products {
 		pro := productResponse{
-			ID: product.ID,
-			Name: product.Name,
+			ID:          product.ID,
+			Name:        product.Name,
 			Description: product.Description,
-			ImagePath: product.ImagePath,
-			PriceCents: product.PriceCents,
+			ImagePath:   product.ImagePath,
+			PriceCents:  product.PriceCents,
 		}
 		res = append(res, pro)
 	}
 	return res
-	
+
 }
 
-func toOrderResponses(orders []orders.Order) []orderResponse{
+func toOrderResponses(orders []orders.Order) []orderResponse {
 	var orderRes []orderResponse
-	for _, order:= range orders{
+	for _, order := range orders {
 		o := orderResponse{
-			ID: order.ID,
-			Status: order.Status,
+			ID:         order.ID,
+			Status:     order.Status,
 			TotalCents: order.TotalCents,
-			CreatedAt: order.CreatedAt,
+			CreatedAt:  order.CreatedAt,
 		}
 		orderRes = append(orderRes, o)
 	}

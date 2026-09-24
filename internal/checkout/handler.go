@@ -1,22 +1,23 @@
 package checkout
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/bootdotdev/learn-web-security/internal/accounts"
-	"github.com/bootdotdev/learn-web-security/internal/auth/sessions"
-	"github.com/bootdotdev/learn-web-security/internal/cart"
-	"github.com/bootdotdev/learn-web-security/internal/httpx"
-	"github.com/bootdotdev/learn-web-security/internal/integrations/acorn"
-	"github.com/bootdotdev/learn-web-security/internal/integrations/pawpal"
-	"github.com/bootdotdev/learn-web-security/internal/logging"
-	"github.com/bootdotdev/learn-web-security/internal/orders"
-	"github.com/bootdotdev/learn-web-security/internal/storage"
-	"github.com/bootdotdev/learn-web-security/internal/templates"
+	"github.com/Nischaldh/learn-web-security/internal/accounts"
+	"github.com/Nischaldh/learn-web-security/internal/auth/sessions"
+	"github.com/Nischaldh/learn-web-security/internal/cart"
+	"github.com/Nischaldh/learn-web-security/internal/httpx"
+	"github.com/Nischaldh/learn-web-security/internal/integrations/acorn"
+	"github.com/Nischaldh/learn-web-security/internal/integrations/pawpal"
+	"github.com/Nischaldh/learn-web-security/internal/logging"
+	"github.com/Nischaldh/learn-web-security/internal/orders"
+	"github.com/Nischaldh/learn-web-security/internal/storage"
+	"github.com/Nischaldh/learn-web-security/internal/templates"
 )
 
 const checkoutAdminNotes = "Awaiting PawPal payment."
@@ -80,10 +81,9 @@ func (handler *Handler) Page(responseWriter http.ResponseWriter, request *http.R
 
 func (handler *Handler) Submit(responseWriter http.ResponseWriter, request *http.Request) {
 	current, ok := handler.requireAuth(responseWriter, request)
-	if !ok || !handler.verifyCSRF(responseWriter, request, current.Session.CSRFToken){
+	if !ok || !handler.verifyCSRF(responseWriter, request, current.Session.CSRFToken) {
 		return
 	}
-
 
 	items, err := handler.cartStore.ListItems(request.Context(), current.User.ID)
 	if err != nil {
@@ -106,13 +106,25 @@ func (handler *Handler) Submit(responseWriter http.ResponseWriter, request *http
 		handler.renderCheckoutError(responseWriter, request, http.StatusBadRequest, current, items, "All shipping fields are required")
 		return
 	}
-	_, err = acorn.Reserve(request.Context(), acorn.Request{
+	_, err = acorn.ReserveWithTimeout(request.Context(), acorn.Request{
 		Name:       shippingDetails.Name,
 		Address:    shippingDetails.Address,
 		City:       shippingDetails.City,
 		Region:     shippingDetails.Region,
 		PostalCode: shippingDetails.PostalCode,
 	}, handler.fulfillmentDelay)
+	if errors.Is(err, context.DeadlineExceeded) {
+		responseWriter.Header().Set("Retry-After", "1")
+		handler.renderCheckoutError(
+			responseWriter,
+			request,
+			http.StatusServiceUnavailable,
+			current,
+			items,
+			"Shipping is temporarily unavailable. Try again shortly.",
+		)
+		return
+	}
 	if err != nil {
 		handler.internalError(responseWriter, request, err)
 		return
@@ -263,7 +275,6 @@ func parseDiscount(value string) int64 {
 	discount, _ := strconv.ParseInt(value, 10, 64)
 	return discount
 }
-
 
 func (handler *Handler) verifyCSRF(responseWriter http.ResponseWriter, request *http.Request, expectedToken string) bool {
 	actualToken, err := httpx.FormValue(request, "csrfToken")

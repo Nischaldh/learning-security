@@ -11,7 +11,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/bootdotdev/learn-web-security/internal/database/dbgen"
+	"github.com/Nischaldh/learn-web-security/internal/database/dbgen"
 )
 
 const tokenTTL = 15 * time.Minute

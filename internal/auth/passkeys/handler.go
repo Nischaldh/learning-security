@@ -11,13 +11,13 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/bootdotdev/learn-web-security/internal/accounts"
-	"github.com/bootdotdev/learn-web-security/internal/auth/mfa"
-	"github.com/bootdotdev/learn-web-security/internal/auth/returnto"
-	"github.com/bootdotdev/learn-web-security/internal/auth/sessions"
-	"github.com/bootdotdev/learn-web-security/internal/httpx"
-	"github.com/bootdotdev/learn-web-security/internal/logging"
-	"github.com/bootdotdev/learn-web-security/internal/templates"
+	"github.com/Nischaldh/learn-web-security/internal/accounts"
+	"github.com/Nischaldh/learn-web-security/internal/auth/mfa"
+	"github.com/Nischaldh/learn-web-security/internal/auth/returnto"
+	"github.com/Nischaldh/learn-web-security/internal/auth/sessions"
+	"github.com/Nischaldh/learn-web-security/internal/httpx"
+	"github.com/Nischaldh/learn-web-security/internal/logging"
+	"github.com/Nischaldh/learn-web-security/internal/templates"
 	"github.com/go-webauthn/webauthn/protocol"
 	webauthn "github.com/go-webauthn/webauthn/webauthn"
 )
@@ -81,7 +81,7 @@ func NewHandler(appOrigin string, accountStore *accounts.Store, mfaStore *mfa.St
 }
 
 func (handler *Handler) LoginPage(responseWriter http.ResponseWriter, request *http.Request) {
-	returnTo :=  returnto.Safe(request.URL.Query().Get("returnTo"))
+	returnTo := returnto.Safe(request.URL.Query().Get("returnTo"))
 	if err := handler.renderLogin(responseWriter, http.StatusOK, "", returnTo); err != nil {
 		handler.internalError(responseWriter, request, err)
 	}
@@ -171,7 +171,7 @@ func (handler *Handler) CompleteLogin(responseWriter http.ResponseWriter, reques
 	}
 	sessionData := challenge.SessionData
 	sessionData.UserID = user.WebAuthnID()
-	credential , err := handler.webauthn.ValidateLogin(user, sessionData, parsedResponse)
+	credential, err := handler.webauthn.ValidateLogin(user, sessionData, parsedResponse)
 	if err != nil {
 		_ = handler.logger.Event("passkey_login_failed", map[string]any{"credentialId": credentialID, "error": err.Error()})
 		if renderErr := handler.renderLogin(responseWriter, http.StatusUnauthorized, "Passkey verification failed.", returnTo); renderErr != nil {
@@ -368,7 +368,6 @@ func (handler *Handler) passkeyResponse(responseWriter http.ResponseWriter, requ
 	request.ContentLength = int64(len(encodedResponse))
 	return challengeID, returnTo, responseFields, nil
 }
-
 
 func responseCredentialID(responseFields map[string]json.RawMessage) (string, bool) {
 	credentialID, err := stringField(responseFields, "id")

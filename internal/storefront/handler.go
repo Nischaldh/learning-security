@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/bootdotdev/learn-web-security/internal/accounts"
-	"github.com/bootdotdev/learn-web-security/internal/auth/sessions"
-	"github.com/bootdotdev/learn-web-security/internal/httpx"
-	"github.com/bootdotdev/learn-web-security/internal/logging"
-	"github.com/bootdotdev/learn-web-security/internal/templates"
+	"github.com/Nischaldh/learn-web-security/internal/accounts"
+	"github.com/Nischaldh/learn-web-security/internal/auth/sessions"
+	"github.com/Nischaldh/learn-web-security/internal/httpx"
+	"github.com/Nischaldh/learn-web-security/internal/logging"
+	"github.com/Nischaldh/learn-web-security/internal/templates"
 )
 
 const maxCartQuantity = 99
@@ -56,7 +56,7 @@ type currentUserView struct {
 
 type reviewView struct {
 	Review
-	CanEdit  bool
+	CanEdit bool
 }
 
 type Handler struct {
@@ -241,8 +241,8 @@ func makeReviewViews(reviews []Review, current *currentUserView) []reviewView {
 	viewReviews := make([]reviewView, 0, len(reviews))
 	for _, review := range reviews {
 		viewReviews = append(viewReviews, reviewView{
-			Review:   review,
-			CanEdit:  current != nil && current.ID == review.UserID,
+			Review:  review,
+			CanEdit: current != nil && current.ID == review.UserID,
 		})
 	}
 	return viewReviews

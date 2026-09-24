@@ -7,8 +7,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/bootdotdev/learn-web-security/internal/templates"
-	"github.com/bootdotdev/learn-web-security/internal/textutils"
+	"github.com/Nischaldh/learn-web-security/internal/templates"
+	"github.com/Nischaldh/learn-web-security/internal/textutils"
 )
 
 const (

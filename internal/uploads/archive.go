@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/bootdotdev/learn-web-security/internal/identifiers"
+	"github.com/Nischaldh/learn-web-security/internal/identifiers"
 )
 
 const (

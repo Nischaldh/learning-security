@@ -6,8 +6,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/bootdotdev/learn-web-security/internal/config"
-	"github.com/bootdotdev/learn-web-security/internal/database"
+	"github.com/Nischaldh/learn-web-security/internal/config"
+	"github.com/Nischaldh/learn-web-security/internal/database"
 )
 
 func main() {

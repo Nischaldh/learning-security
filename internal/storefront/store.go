@@ -5,19 +5,19 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/bootdotdev/learn-web-security/internal/database/dbgen"
+	"github.com/Nischaldh/learn-web-security/internal/database/dbgen"
 )
 
 type Product struct {
-	ID             int64  
-	Name           string 
-	Description    string 
-	ImagePath      string 
-	PriceCents     int64  
-	CostCents      int64  
-	InventoryCount int64  
-	IsActive       bool   
-	CreatedAt      string 
+	ID             int64
+	Name           string
+	Description    string
+	ImagePath      string
+	PriceCents     int64
+	CostCents      int64
+	InventoryCount int64
+	IsActive       bool
+	CreatedAt      string
 }
 
 type Review struct {
@@ -33,11 +33,11 @@ type Review struct {
 }
 
 type Store struct {
-	queries  *dbgen.Queries
+	queries *dbgen.Queries
 }
 
 func NewStore(database *sql.DB) *Store {
-	return &Store{ queries: dbgen.New(database)}
+	return &Store{queries: dbgen.New(database)}
 }
 
 func (store *Store) ListProducts(ctx context.Context, maxResults int64) ([]Product, error) {
@@ -50,7 +50,7 @@ func (store *Store) ListProducts(ctx context.Context, maxResults int64) ([]Produ
 
 func (store *Store) SearchProducts(ctx context.Context, query string, maxResults int64) ([]Product, error) {
 	rows, err := store.queries.SearchActiveProducts(ctx, dbgen.SearchActiveProductsParams{
-		Pattern: "%" + query + "%",
+		Pattern:    "%" + query + "%",
 		MaxResults: maxResults,
 	})
 	if err != nil {
@@ -114,5 +114,3 @@ func mapProduct(row dbgen.Product) Product {
 		CreatedAt:      row.CreatedAt,
 	}
 }
-
-

@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/bootdotdev/learn-web-security/internal/config"
+	"github.com/Nischaldh/learn-web-security/internal/config"
 )
 
 type policyResult struct {

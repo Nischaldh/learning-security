@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/bootdotdev/learn-web-security/internal/accounts"
-	"github.com/bootdotdev/learn-web-security/internal/auth/sessions"
-	"github.com/bootdotdev/learn-web-security/internal/httpx"
-	"github.com/bootdotdev/learn-web-security/internal/logging"
-	"github.com/bootdotdev/learn-web-security/internal/templates"
+	"github.com/Nischaldh/learn-web-security/internal/accounts"
+	"github.com/Nischaldh/learn-web-security/internal/auth/sessions"
+	"github.com/Nischaldh/learn-web-security/internal/httpx"
+	"github.com/Nischaldh/learn-web-security/internal/logging"
+	"github.com/Nischaldh/learn-web-security/internal/templates"
 )
 
 type itemView struct {
@@ -187,21 +187,21 @@ func makeItemViews(items []Item) []itemView {
 }
 
 func parseQuantity(value string, minimum int64) (int64, bool) {
-	if value == ""|| len(value)>2{
+	if value == "" || len(value) > 2 {
 		return 0, false
-	} 
-	if value == "0"{
-		if minimum>0{
+	}
+	if value == "0" {
+		if minimum > 0 {
 			return 0, false
 		}
 		return 0, true
 	}
-	 if value[0] < '1' || value[0] > '9' {
-        return 0, false
-    }
+	if value[0] < '1' || value[0] > '9' {
+		return 0, false
+	}
 	if len(value) == 2 && (value[1] < '0' || value[1] > '9') {
-        return 0, false
-    }
+		return 0, false
+	}
 	parsed, err := strconv.ParseFloat(value, 64)
 	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed != math.Trunc(parsed) {
 		return 0, false

@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/bootdotdev/learn-web-security/internal/accounts"
-	"github.com/bootdotdev/learn-web-security/internal/auth/sessions"
-	"github.com/bootdotdev/learn-web-security/internal/httpx"
-	"github.com/bootdotdev/learn-web-security/internal/logging"
-	"github.com/bootdotdev/learn-web-security/internal/templates"
+	"github.com/Nischaldh/learn-web-security/internal/accounts"
+	"github.com/Nischaldh/learn-web-security/internal/auth/sessions"
+	"github.com/Nischaldh/learn-web-security/internal/httpx"
+	"github.com/Nischaldh/learn-web-security/internal/logging"
+	"github.com/Nischaldh/learn-web-security/internal/templates"
 )
 
 type taxExemptionPage struct {
@@ -166,7 +166,7 @@ func (handler *Handler) readUpload(responseWriter http.ResponseWriter, request *
 		return nil, "", err
 	}
 	files := request.MultipartForm.File["document"]
-	if len(files) == 0 {
+	if len(files) != 1 {
 		return nil, "", errors.New("missing document upload")
 	}
 	file, err := files[0].Open()

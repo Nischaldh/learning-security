@@ -8,34 +8,30 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
-	"github.com/bootdotdev/learn-web-security/internal/account"
-	"github.com/bootdotdev/learn-web-security/internal/accounts"
-	"github.com/bootdotdev/learn-web-security/internal/admin"
-	"github.com/bootdotdev/learn-web-security/internal/api"
-	"github.com/bootdotdev/learn-web-security/internal/assistant"
-	"github.com/bootdotdev/learn-web-security/internal/auth/mfa"
-	"github.com/bootdotdev/learn-web-security/internal/auth/passkeys"
-	"github.com/bootdotdev/learn-web-security/internal/auth/passwordreset"
-	"github.com/bootdotdev/learn-web-security/internal/cart"
-	"github.com/bootdotdev/learn-web-security/internal/checkout"
-	"github.com/bootdotdev/learn-web-security/internal/httpx"
-	"github.com/bootdotdev/learn-web-security/internal/imagepreview"
-	"github.com/bootdotdev/learn-web-security/internal/integrations/pawpal"
-	"github.com/bootdotdev/learn-web-security/internal/logging"
-	"github.com/bootdotdev/learn-web-security/internal/orders"
-	"github.com/bootdotdev/learn-web-security/internal/reviews"
-	"github.com/bootdotdev/learn-web-security/internal/storage"
-	"github.com/bootdotdev/learn-web-security/internal/storefront"
-	"github.com/bootdotdev/learn-web-security/internal/support"
-	"github.com/bootdotdev/learn-web-security/internal/templates"
-	"github.com/bootdotdev/learn-web-security/internal/uploads"
-)
-
-const (
-	defaultUploadBytes            = 5 * 1024 * 1024
-	unboundedPublicProductResults = -1
+	"github.com/Nischaldh/learn-web-security/internal/account"
+	"github.com/Nischaldh/learn-web-security/internal/accounts"
+	"github.com/Nischaldh/learn-web-security/internal/admin"
+	"github.com/Nischaldh/learn-web-security/internal/api"
+	"github.com/Nischaldh/learn-web-security/internal/assistant"
+	"github.com/Nischaldh/learn-web-security/internal/auth/mfa"
+	"github.com/Nischaldh/learn-web-security/internal/auth/passkeys"
+	"github.com/Nischaldh/learn-web-security/internal/auth/passwordreset"
+	"github.com/Nischaldh/learn-web-security/internal/cart"
+	"github.com/Nischaldh/learn-web-security/internal/checkout"
+	"github.com/Nischaldh/learn-web-security/internal/httpx"
+	"github.com/Nischaldh/learn-web-security/internal/imagepreview"
+	"github.com/Nischaldh/learn-web-security/internal/integrations/pawpal"
+	"github.com/Nischaldh/learn-web-security/internal/logging"
+	"github.com/Nischaldh/learn-web-security/internal/orders"
+	"github.com/Nischaldh/learn-web-security/internal/reviews"
+	"github.com/Nischaldh/learn-web-security/internal/storage"
+	"github.com/Nischaldh/learn-web-security/internal/storefront"
+	"github.com/Nischaldh/learn-web-security/internal/support"
+	"github.com/Nischaldh/learn-web-security/internal/templates"
+	"github.com/Nischaldh/learn-web-security/internal/uploads"
 )
 
 type Options struct {
@@ -100,7 +96,7 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 		accountStore,
 		renderer,
 		logger,
-		unboundedPublicProductResults,
+		options.MaxPublicProductResults,
 	)
 	var downloadSigningKey [32]byte
 	if _, err := rand.Read(downloadSigningKey[:]); err != nil {
@@ -113,11 +109,11 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 		logger,
 		options.EncryptionKeyring,
 		uploadDirectory,
-		defaultUploadBytes,
+		options.MaxUploadBytes,
 		options.DownloadSigningKey,
 	)
 	adminHandler := admin.NewHandler(admin.NewStore(database), accountStore, renderer, logger, imagepreview.NewService(), options.MaxUploadBytes)
-	apiHandler := api.NewHandler(accountStore, orderStore, productStore, api.NewStore(database), logger, unboundedPublicProductResults)
+	apiHandler := api.NewHandler(accountStore, orderStore, productStore, api.NewStore(database), logger, options.MaxPublicProductResults)
 	assistantHandler := assistant.NewHandler(accountStore, assistant.NewService(orderStore), renderer, logger)
 	supportHandler := support.NewHandler(
 		accountStore,
@@ -127,9 +123,9 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 		logger,
 		options.EncryptionKeyring,
 		filepath.Join(options.DataDirectory, "bulk-tax-documents"),
-		defaultUploadBytes,
+		options.MaxUploadBytes,
 	)
-	authenticationHandler := newAuthHandler(accountStore, mfaStore, passwordResetStore, renderer, logger, options.AppOrigin)
+	authenticationHandler := newAuthHandler(accountStore, mfaStore, passwordResetStore, renderer, logger, options.AppOrigin, options.TrustedProxyHops)
 	passkeyHandler, err := passkeys.NewHandler(
 		options.AppOrigin,
 		accountStore,
@@ -142,17 +138,53 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 	if err != nil {
 		return nil, err
 	}
+	productAPILimiter := fixedWindowRateLimiter(rateLimitOptions{
+		window:  time.Minute,
+		maximum: 30,
+		key:     clientIPKeyWithTrustedProxies(options.TrustedProxyHops),
+		onLimit: func(responseWriter http.ResponseWriter, _ *http.Request, _ rateLimitState) {
+			responseWriter.Header().Set("Access-Control-Allow-Origin", "*")
+			httpx.RespondWithJSON(responseWriter, http.StatusTooManyRequests, map[string]string{"error": "Too many requests"})
+		},
+	})
+	loginSourceLimiter := fixedWindowRateLimiter(rateLimitOptions{
+		window:  15 * time.Minute,
+		maximum: 20,
+		key:     clientIPKeyWithTrustedProxies(options.TrustedProxyHops),
+	})
+
+	loginAccountLimiter := fixedWindowRateLimiter(rateLimitOptions{
+		window:  15 * time.Minute,
+		maximum: 5,
+		key: func(request *http.Request) string {
+			return strings.ToLower(strings.TrimSpace(request.FormValue("email")))
+		},
+	})
+
+	passwordResetSourceLimiter := fixedWindowRateLimiter(rateLimitOptions{
+		window:  time.Hour,
+		maximum: 10,
+		key:     clientIPKeyWithTrustedProxies(options.TrustedProxyHops),
+	})
+
+	passwordResetAccountLimiter := fixedWindowRateLimiter(rateLimitOptions{
+		window:  time.Hour,
+		maximum: 3,
+		key: func(request *http.Request) string {
+			return strings.ToLower(strings.TrimSpace(request.FormValue("email")))
+		},
+	})
+
 	dynamicMux := http.NewServeMux()
 	dynamicMux.HandleFunc("GET /{$}", storefrontHandler.Storefront)
-	dynamicMux.HandleFunc("GET /search", storefrontHandler.Search)
+	dynamicMux.Handle(
+		"GET /search",
+		SearchThrottle(renderer)(http.HandlerFunc(storefrontHandler.Search)),
+	)
 	dynamicMux.HandleFunc("GET /products/{id}", storefrontHandler.Product)
 	dynamicMux.HandleFunc("GET /api/account/orders", apiHandler.AccountOrders)
 	dynamicMux.HandleFunc("GET /api/orders/{id}", apiHandler.Order)
-	dynamicMux.Handle(
-		"GET /api/products",
-		publicProductCORS(http.HandlerFunc(apiHandler.Products)),
-	)
-
+	dynamicMux.Handle("GET /api/products", publicProductCORS(productAPILimiter(http.HandlerFunc(apiHandler.Products))))
 	dynamicMux.HandleFunc("OPTIONS /api/products", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", http.MethodGet)
@@ -161,16 +193,51 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 	dynamicMux.HandleFunc("GET /api/integrations/warehouse/orders", apiHandler.WarehouseOrders)
 	dynamicMux.Handle("POST /products/{id}/reviews", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(reviewHandler.Create)))
 	dynamicMux.HandleFunc("GET /login", authenticationHandler.LoginPage)
-	dynamicMux.Handle("POST /login", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(authenticationHandler.Login)))
+	dynamicMux.Handle(
+		"POST /login",
+		parseForm(
+			options.MaxRequestBodyBytes,
+			renderer,
+		)(
+			loginSourceLimiter(
+				loginAccountLimiter(
+					http.HandlerFunc(authenticationHandler.Login),
+				),
+			),
+		),
+	)
 	dynamicMux.HandleFunc("GET /login/totp", authenticationHandler.TOTPLoginPage)
-	dynamicMux.Handle("POST /login/totp", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(authenticationHandler.TOTPLogin)))
+	dynamicMux.Handle(
+		"POST /login/totp",
+		parseForm(
+			options.MaxRequestBodyBytes,
+			renderer,
+		)(
+			loginSourceLimiter(
+				http.HandlerFunc(authenticationHandler.TOTPLogin),
+			),
+		),
+	)
+
 	dynamicMux.HandleFunc("POST /login/totp/cancel", authenticationHandler.CancelTOTPLogin)
 	dynamicMux.HandleFunc("GET /signup", authenticationHandler.SignupPage)
 	dynamicMux.Handle("POST /signup", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(authenticationHandler.Signup)))
 	dynamicMux.HandleFunc("GET /recover-mfa", authenticationHandler.MFARecoveryPage)
 	dynamicMux.Handle("POST /recover-mfa", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(authenticationHandler.RecoverMFA)))
 	dynamicMux.HandleFunc("GET /password-reset", authenticationHandler.PasswordResetRequestPage)
-	dynamicMux.Handle("POST /password-reset", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(authenticationHandler.RequestPasswordReset)))
+	dynamicMux.Handle(
+		"POST /password-reset",
+		parseForm(
+			options.MaxRequestBodyBytes,
+			renderer,
+		)(
+			passwordResetSourceLimiter(
+				passwordResetAccountLimiter(
+					http.HandlerFunc(authenticationHandler.RequestPasswordReset),
+				),
+			),
+		),
+	)
 	dynamicMux.HandleFunc("GET /password-reset/{token}", authenticationHandler.PasswordResetPage)
 	dynamicMux.Handle("POST /password-reset/{token}", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(authenticationHandler.ResetPassword)))
 	dynamicMux.HandleFunc("POST /logout", authenticationHandler.Logout)
@@ -225,8 +292,16 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 			http.Error(responseWriter, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		}
 	})
-
-	dynamicHandler := validateRequestOrigin(options.AppOrigin, renderer)(dynamicMux)
+	dynamicHandler := applyMiddleware(
+		dynamicMux,
+		LoadShedder(50, 1),
+		fixedWindowRateLimiter(rateLimitOptions{
+			window:  time.Minute,
+			maximum: 100,
+			key:     clientIPKeyWithTrustedProxies(options.TrustedProxyHops),
+		}),
+		validateRequestOrigin(options.AppOrigin, renderer),
+	)
 
 	mainMux := http.NewServeMux()
 	mainMux.HandleFunc("GET /health", func(responseWriter http.ResponseWriter, _ *http.Request) {
@@ -248,11 +323,21 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 	)
 	mainMux.Handle("GET /product-photos/{filename}", staticHandler)
 	mainMux.HandleFunc("POST /integrations/pawpal/webhook", pawPalHandler.Webhook)
+	mainMux.HandleFunc("GET /.well-known/security.txt", func(responseWriter http.ResponseWriter, request *http.Request) {
+		expires := time.Now().UTC().Add(180 * 24 * time.Hour).Format(time.RFC3339)
+
+		responseWriter.Header().Set("Content-Type", "text/plain")
+		fmt.Fprintf(responseWriter,
+			"Contact: mailto:security@bearlysecure.example\nPolicy: https://bearlysecure.example/security-policy\nExpires: %s\n\n",
+			expires,
+		)
+	})
 	mainMux.Handle("/", dynamicHandler)
 
 	handler := applyMiddleware(
 		mainMux,
 		cspNonce,
+		assignRequestID,
 		securityHeaders,
 		recoverPanics(logger, renderer),
 	)
